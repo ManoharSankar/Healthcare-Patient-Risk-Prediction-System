@@ -37,17 +37,17 @@ def get_logger():
     logger.setLevel(logging.INFO)
 
     if not logger.handlers:
-        session = boto3.Session(region_name="ap-south-1")
         cw_handler = watchtower.CloudWatchLogHandler(
-            boto3_session=session,
             log_group="/aws/streamlit/patient-risk",
-            stream_name="app-logs"
+            stream_name="app-logs",
+            region_name="ap-south-1"
         )
         formatter = logging.Formatter("%(asctime)s — %(levelname)s — %(message)s")
         cw_handler.setFormatter(formatter)
         logger.addHandler(cw_handler)
 
     return logger
+
 
 # ✅ Initialize logger immediately so it's available globally
 logger = get_logger()
