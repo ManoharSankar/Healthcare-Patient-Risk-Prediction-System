@@ -43,16 +43,21 @@ def preprocess_data(df):
     # Encode categorical variables
     df_encoded = pd.get_dummies(df, drop_first=False)
 
-    # Handle target column dynamically
+    # 🎯 Handle target column dynamically
     if "readmitted" in df.columns:
-        y = df["readmitted"].apply(lambda x: 1 if x == "NO" else 0)
+    # 1 = Readmitted (High Risk), 0 = Not Readmitted (Low Risk)
+        y = (df["readmitted"] != "NO").astype(int)
         X = df.drop("readmitted", axis=1)
         X = pd.get_dummies(X, drop_first=False)
+
     elif "readmitted_NO" in df_encoded.columns:
-        y = df_encoded["readmitted_NO"]
+    # Use existing encoded column
+        y = 1 - df_encoded["readmitted_NO"]  # Flip so that 1 = Readmitted
         X = df_encoded.drop("readmitted_NO", axis=1)
+
     else:
-        raise ValueError("❌ Target column 'readmitted' or 'readmitted_NO' not found.")
+        raise ValueError("Target column 'readmitted' or 'readmitted_NO' not found.")
+
 
     # Scale only numeric columns
     num_cols = X.select_dtypes(include=np.number).columns
