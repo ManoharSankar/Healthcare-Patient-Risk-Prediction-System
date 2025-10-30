@@ -4,8 +4,6 @@ import joblib
 import boto3
 import io
 import json
-import logging
-import watchtower
 from datetime import datetime
 from sqlalchemy import create_engine, text, inspect
 import plotly.express as px
@@ -28,31 +26,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --------------------------
-# 📡 CloudWatch Logging Setup
-# --------------------------
-@st.cache_resource
-def get_logger():
-    """Initialize CloudWatch logger"""
-    logger = logging.getLogger("patient-risk-app")
-    logger.setLevel(logging.INFO)
-
-    if not logger.handlers:
-        cw_handler = watchtower.CloudWatchLogHandler(
-            log_group="/aws/streamlit/patient-risk",
-            stream_name="app-logs",
-            region_name="ap-south-1"
-        )
-        formatter = logging.Formatter("%(asctime)s — %(levelname)s — %(message)s")
-        cw_handler.setFormatter(formatter)
-        logger.addHandler(cw_handler)
-
-    return logger
-
-
-# ✅ Initialize logger immediately so it's available globally
-logger = get_logger()
-logger.info("✅ Streamlit app started successfully.")
-# --------------------------
 # 🧠 Load Model from S3
 # --------------------------
 @st.cache_resource
@@ -63,10 +36,8 @@ def load_model_from_s3(bucket="healthcarepatientrecords25"):
         cols_obj = s3.get_object(Bucket=bucket, Key="models/model_columns.pkl")
         model = joblib.load(io.BytesIO(model_obj["Body"].read()))
         model_columns = joblib.load(io.BytesIO(cols_obj["Body"].read()))
-        logger.info("✅ Model loaded successfully from S3.")
         return model, model_columns
     except Exception as e:
-        logger.error(f"❌ Model loading failed: {e}")
         st.error(f"Model could not be loaded from S3: {e}")
         st.stop()
 
@@ -87,10 +58,8 @@ def get_engine():
         engine = create_engine(f"{engine_type}://{secret['username']}:{secret['password']}@{secret['host']}/{db_name}")
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        logger.info("✅ Database connection successful.")
         return engine
     except Exception as e:
-        logger.error(f"❌ Database connection failed: {e}")
         st.error(f"Database connection failed: {e}")
         st.stop()
 
@@ -124,14 +93,12 @@ def ensure_table_schema(engine):
             # Create table if missing
             cols_sql = ", ".join([f"{col} {dtype}" for col, dtype in required_columns.items()])
             conn.execute(text(f"CREATE TABLE patient_predictions ({cols_sql});"))
-            logger.info("🆕 Created patient_predictions table in RDS.")
         else:
             # Add any missing columns
             existing_cols = [col["name"] for col in inspector.get_columns("patient_predictions")]
             for col, dtype in required_columns.items():
                 if col not in existing_cols:
                     conn.execute(text(f"ALTER TABLE patient_predictions ADD COLUMN {col} {dtype};"))
-                    logger.info(f"➕ Added missing column '{col}' to patient_predictions table.")
 
 ensure_table_schema(engine)
 
@@ -197,7 +164,6 @@ if menu == "Predict Risk":
                 </div>
             """, unsafe_allow_html=True)
             st.progress(prob)
-            logger.info(f"Prediction made for {patient_id}: {label} ({prob:.3f})")
 
             record = pd.DataFrame([{
                 "patient_id": patient_id,
@@ -217,11 +183,9 @@ if menu == "Predict Risk":
 
             record.to_sql("patient_predictions", engine, if_exists="append", index=False)
             st.success("💾 Prediction saved to database.")
-            logger.info(f"✅ Saved prediction for {patient_id} to RDS.")
 
         except Exception as e:
             st.error(f"Prediction failed: {e}")
-            logger.error(f"Prediction failed for {patient_id}: {e}")
 
 # --------------------------
 # 📊 ANALYTICS DASHBOARD
@@ -242,10 +206,8 @@ elif menu == "Analytics Dashboard":
     with st.spinner("Fetching analytics data..."):
         try:
             df = fetch_data()
-            logger.info(f"Fetched {len(df)} records for analytics.")
         except Exception as e:
             st.error(f"❌ Database error: {e}")
-            logger.error(f"Analytics fetch error: {e}")
             st.stop()
 
     if df.empty:
