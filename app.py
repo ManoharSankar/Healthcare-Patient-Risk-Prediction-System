@@ -34,11 +34,12 @@ def load_model_from_s3(bucket="healthcarepatientrecords25"):
     try:
         model_obj = s3.get_object(Bucket=bucket, Key="models/patient_risk_model.pkl")
         cols_obj = s3.get_object(Bucket=bucket, Key="models/model_columns.pkl")
+
         model = joblib.load(io.BytesIO(model_obj["Body"].read()))
         model_columns = joblib.load(io.BytesIO(cols_obj["Body"].read()))
         return model, model_columns
     except Exception as e:
-        st.error(f"Model could not be loaded from S3: {e}")
+        st.error(f"❌ Model could not be loaded from S3: {e}")
         st.stop()
 
 model, model_columns = load_model_from_s3()
@@ -48,28 +49,32 @@ model, model_columns = load_model_from_s3()
 # --------------------------
 @st.cache_resource
 def get_engine():
-    secret_name = "patientriskdb/credentials"
+    secret_name = "patientriskdb/credentials"  # You can store this in st.secrets for security
     region_name = "ap-south-1"
     try:
         client = boto3.client("secretsmanager", region_name=region_name)
         secret = json.loads(client.get_secret_value(SecretId=secret_name)["SecretString"])
         db_name = secret.get("dbname", secret.get("dbClusterIdentifier"))
         engine_type = secret.get("engine", "postgresql").replace("postgres", "postgresql")
-        engine = create_engine(f"{engine_type}://{secret['username']}:{secret['password']}@{secret['host']}/{db_name}")
+
+        engine = create_engine(
+            f"{engine_type}://{secret['username']}:{secret['password']}@{secret['host']}/{db_name}"
+        )
+
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return engine
     except Exception as e:
-        st.error(f"Database connection failed: {e}")
+        st.error(f"❌ Database connection failed: {e}")
         st.stop()
 
 engine = get_engine()
 
 # --------------------------
-# 🧩 Ensure Table Schema Exists
+# 🧱 Ensure Table Schema Exists
 # --------------------------
 def ensure_table_schema(engine):
-    """Ensure the patient_predictions table has all required columns"""
+    """Ensure the patient_predictions table exists with the required columns"""
     required_columns = {
         "patient_id": "VARCHAR(50)",
         "age": "INT",
@@ -86,24 +91,47 @@ def ensure_table_schema(engine):
         "timestamp": "TIMESTAMP"
     }
 
-    inspector = inspect(engine)
-    with engine.connect() as conn:
-        tables = inspector.get_table_names()
-        if "patient_predictions" not in tables:
-            # Create table if missing
-            cols_sql = ", ".join([f"{col} {dtype}" for col, dtype in required_columns.items()])
-            conn.execute(text(f"CREATE TABLE patient_predictions ({cols_sql});"))
-        else:
-            # Add any missing columns
+    create_table_sql = """
+    CREATE TABLE IF NOT EXISTS patient_predictions (
+        patient_id VARCHAR(50),
+        age INT,
+        heart_rate INT,
+        bp_systolic INT,
+        bp_diastolic INT,
+        hemoglobin FLOAT,
+        length_of_stay INT,
+        gender VARCHAR(50),
+        race VARCHAR(50),
+        diagnosis VARCHAR(100),
+        risk_score FLOAT,
+        prediction_label VARCHAR(50),
+        timestamp TIMESTAMP
+    );
+    """
+
+    try:
+        inspector = inspect(engine)
+        with engine.connect() as conn:
+            # Create table if not exists
+            conn.execute(text(create_table_sql))
+            conn.commit()
+
+            # Add any missing columns dynamically
             existing_cols = [col["name"] for col in inspector.get_columns("patient_predictions")]
             for col, dtype in required_columns.items():
                 if col not in existing_cols:
-                    conn.execute(text(f"ALTER TABLE patient_predictions ADD COLUMN {col} {dtype};"))
+                    alter_sql = f"ALTER TABLE patient_predictions ADD COLUMN {col} {dtype};"
+                    conn.execute(text(alter_sql))
+                    conn.commit()
+        st.success("✅ Table schema verified and ready.")
+    except Exception as e:
+        st.error(f"❌ Failed to ensure table schema: {e}")
+        st.stop()
 
 ensure_table_schema(engine)
 
 # --------------------------
-# 🧮 Sidebar
+# 🧮 Sidebar Navigation
 # --------------------------
 menu = st.sidebar.radio("Navigation", ["Predict Risk", "Analytics Dashboard"])
 st.sidebar.markdown("---")
@@ -148,6 +176,7 @@ if menu == "Predict Risk":
                 "race": [race],
                 "diagnosis": [diagnosis],
             })
+
             input_data = pd.get_dummies(input_data)
             input_data = input_data.reindex(columns=model_columns, fill_value=0)
 
@@ -213,15 +242,19 @@ elif menu == "Analytics Dashboard":
     if df.empty:
         st.info("No prediction records found.")
     else:
-        col1, col2, col3, col4 = st.columns([1,1,1,1])
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
         col1.metric("📊 Total Predictions", len(df))
         col2.metric("⚠️ High Risk", len(df[df["prediction_label"] == "High Risk"]))
         col3.metric("✅ Low Risk", len(df[df["prediction_label"] == "Low Risk"]))
         col4.metric("📉 Avg Risk Score", f"{df['risk_score'].mean():.2f}")
 
         fig = px.line(
-            df, x="timestamp", y="risk_score", color="prediction_label",
-            title="Risk Trends Over Time", markers=True
+            df,
+            x="timestamp",
+            y="risk_score",
+            color="prediction_label",
+            title="Risk Trends Over Time",
+            markers=True,
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -230,4 +263,4 @@ elif menu == "Analytics Dashboard":
 
         if st.button("🔄 Refresh Data"):
             fetch_data.clear()
-            st.experimental_rerun()
+            st.rerun()
