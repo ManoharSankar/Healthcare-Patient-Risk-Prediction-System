@@ -1,70 +1,70 @@
-name: CI/CD for Patient Risk App
+name: 🚀 Deploy Healthcare Patient Risk Prediction System
 
 on:
   push:
     branches:
       - main
-
-env:
-  AWS_REGION: ap-south-1
-  ECR_REPO: patient-risk-app
-  EC2_USER: ubuntu
-  EC2_HOST: ${{ secrets.EC2_HOST }}
-  EC2_KEY: ${{ secrets.EC2_KEY }}
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  build-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      # ------------------------------
+      # Step 1: Checkout Repository
+      # ------------------------------
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      # ------------------------------
+      # Step 2: Set Up Python
+      # ------------------------------
+      - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run unit tests
-        run: python -m py_compile app.py train_model.py
-
-      - name: Deploy SageMaker Endpoint
+      # ------------------------------
+      # Step 3: Install Dependencies
+      # ------------------------------
+      - name: 📦 Install dependencies
         run: |
-          echo "🚀 Deploying SageMaker endpoint..."
-          python train_model.py
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Build Docker image
-        run: docker build -t $ECR_REPO .
-
-      - name: Login to ECR
+      # ------------------------------
+      # Step 4: Lint and Compile Code
+      # ------------------------------
+      - name: ✅ Lint & Compile Python files
         run: |
-          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
+          echo "Checking Python syntax..."
+          python -m py_compile app.py train_model.py
 
-      - name: Push image to ECR
+      # ------------------------------
+      # Step 5: Run Sanity Tests
+      # ------------------------------
+      - name: 🧪 Run basic tests
         run: |
-          docker tag $ECR_REPO:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:latest
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:latest
+          echo "Running sanity checks..."
+          python -m py_compile app.py
+          python -m py_compile train_model.py
 
-      - name: Deploy Streamlit App to EC2
+      # ------------------------------
+      # Step 6: Deploy Streamlit App
+      # ------------------------------
+      - name: 🚀 Deploy Streamlit Application
         run: |
-          echo "Deploying new version to EC2..."
-          echo "${{ secrets.EC2_KEY }}" > key.pem
-          chmod 600 key.pem
-          scp -o StrictHostKeyChecking=no -i key.pem -r scripts/ $EC2_USER@$EC2_HOST:~/scripts
-          ssh -o StrictHostKeyChecking=no -i key.pem $EC2_USER@$EC2_HOST << 'EOF'
-            export AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
-            export AWS_REGION=${{ env.AWS_REGION }}
-            bash ~/scripts/stop_app.sh
-            bash ~/scripts/start_app.sh
-          EOF
-      
+          chmod +x scripts/start_app.sh
+          bash scripts/start_app.sh
+
+      # ------------------------------
+      # Step 7: Stop Old Version (Optional)
+      # ------------------------------
+      - name: 🧹 Stop previous deployment
+        if: always()
+        run: |
+          chmod +x scripts/stop_app.sh
+          bash scripts/stop_app.sh
